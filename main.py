@@ -9,20 +9,18 @@ import uvicorn
 
 app = FastAPI()
 
-# Evaluate root endpoint
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Event Ticketing System API"}
 
-# create user endpoint
 @app.post("/users/", response_model=UserOut)
 def create_user(user: UserCreate, db=Depends(get_db)):
-    # check for existing user with same email
+    """Create the user endpoint"""
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="User already exists")
     
-    # If no existing user, create a new one
+
     new_user = User(
         name = user.name,
         phone_number = user.phone_number,
@@ -30,36 +28,31 @@ def create_user(user: UserCreate, db=Depends(get_db)):
         password = hash_password(user.password)
     )
 
-    # Save to database
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
     return new_user
 
-
-# create show endpoint
 @app.post("/shows/", response_model=ShowOut)
 def create_show(show: ShowCreate, db=Depends(get_db)):
-    # Check for existing show with same title and start time
+    """ create show endpoint"""
     existing_show = db.query(Show).filter(Show.title == show.title, Show.starts_at == show.starts_at).first()
     if existing_show:
         raise HTTPException(status_code=400, detail="Show with the same title and start time already exists")
     
-    # unpack show data and create Show instance
     new_show = Show(**show.dict())
 
-    # Save to database
     db.add(new_show)
     db.commit()
     db.flush(new_show)
 
     return new_show
 
-# bulk create seats endpoint
+
 @app.post("/shows/{show_id}/seats", response_model=list[SeatOut])
 def create_seats_bulk(show_id: int, seats: SeatCreateBulk, db=Depends(get_db)):
-     # Check if show exists
+    """Bulk create seats endpoint"""
     show = db.query(Show).filter(Show.id == show_id).first()
     if not show:
         raise HTTPException(status_code=404, detail="Show not found")
@@ -70,11 +63,10 @@ def create_seats_bulk(show_id: int, seats: SeatCreateBulk, db=Depends(get_db)):
     except ValueError as ve:
         raise HTTPException(status_code=422, detail=str(ve))
     
-    # use a set to check for duplicates
+    # check for seat duplicates
     if len(normalized_labels) != len(set(normalized_labels)):
         raise HTTPException(status_code=400, detail="Duplicate seat labels in request")
 
-    # Create seat objects via list comprehension
     new_seats = [Seat(show_id = show_id, seat_number=labels) for labels in normalized_labels]
 
     # Bulk save seats into database and handle potential integrity errors
@@ -83,7 +75,6 @@ def create_seats_bulk(show_id: int, seats: SeatCreateBulk, db=Depends(get_db)):
         db.flush()  # populate new_seats with IDs
     except IntegrityError:
         db.rollback()
-        # Seat labels caused the conflict by violating the unique constraint
         raise HTTPException(status_code=409, detail="One or more seat labels already exist for this show")
     
     db.commit()
@@ -92,7 +83,7 @@ def create_seats_bulk(show_id: int, seats: SeatCreateBulk, db=Depends(get_db)):
 
 @app.get("/shows/{show_id}/seats", response_model=list[SeatOut])
 def get_seats_for_show(show_id: int, db=Depends(get_db)):
-    # check if show exists
+    """create seats for a show"""
     show = db.query(Show).filter(Show.id == show_id).first()
     if not show:
         raise HTTPException(status_code=404, detail="Show not found")
@@ -100,6 +91,8 @@ def get_seats_for_show(show_id: int, db=Depends(get_db)):
     # fetch seats for the show
     seats = db.query(Seat).filter(Seat.show_id == show_id).all()
     return seats
+
+@app.get()
 
 # reservation endpoints
 @app.post("/reservations/{user_id}/hold", response_model=ReservationOut)
@@ -133,7 +126,6 @@ def hold_seat_reservation(user_id: int, reservation: ReservationCreate, db=Depen
         db.flush()  # populate new_reservation with ID
     except IntegrityError:
         db.rollback()
-        # Seat is already reserved
         raise HTTPException(status_code=409, detail="Seat is already reserved")
     
     # if flush is successful, commit the transaction
@@ -147,11 +139,9 @@ def confirm_seat_reservation(reservation_id: int, db=Depends(get_db)):
     # Lock reservation row to avoid two concurrent confirmations
     reservation = db.query(Reservation).filter(Reservation.id ==reservation_id).with_for_update().first()
 
-    # if not found, raise 404 error
     if not reservation:
         raise HTTPException(status_code=404, detail="Reservation not found")
     
-    # confirm idempotently
     if reservation.status == "CONFIRMED":
        return reservation
     
@@ -159,14 +149,12 @@ def confirm_seat_reservation(reservation_id: int, db=Depends(get_db)):
     if reservation.status != "HELD":
         raise HTTPException(status_code=400, detail=f"Cannot confirm a reservation with status {reservation.status}")
     
-    # compare to time in database
     now_db = db.scalar(select(func.now()))
     if reservation.hold_expiry <= now_db:
         reservation.status = "EXPIRED"
         db.commit()
         raise HTTPException(status_code=400, detail="Reservation has expired")
 
-    # ensure Integrity errors are handled before committing
     reservation.status = "CONFIRMED"
     try:
         db.commit() 
@@ -177,26 +165,21 @@ def confirm_seat_reservation(reservation_id: int, db=Depends(get_db)):
     db.refresh(reservation)
     return reservation
 
-# cancel reservation endpoint
 @app.post("/reservations/{reservation_id}/release", response_model=ReservationOut)
 def release_seat_reservation(reservation_id: int, db=Depends(get_db)):
-    # find if reservation exists
     reservation = db.query(Reservation).filter(Reservation.id == reservation_id).with_for_update().first()
     if not reservation:
         raise HTTPException(status_code=404, detail="Reservation not found")
     
-    # check if already cancelled: idempotent
     if reservation.status == "CANCELLED":
         return reservation
     
-    # only held reservations can be cancelled
     if reservation.status != "HELD":
         raise HTTPException(status_code=400, detail=f"Cannot cancel a reservation with status {reservation.status}")
     
-    # cancel the reservation
+    # cancel reservation
     reservation.status = "CANCELLED"
 
-    # commit the change and handle potential integrity errors
     try:
         db.commit()
     except IntegrityError:
