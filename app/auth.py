@@ -4,16 +4,15 @@ from fastapi.security import OAuth2AuthorizationCodeBearer
 from fastapi import HTTPException
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
-from pydantic_settings import BaseSettings
 from app.config import Settings
 
 settings = Settings()
 
-oauth2_scheme = OAuth2AuthorizationCodeBearer(tokenUrl="token")
+oauth2_scheme = OAuth2AuthorizationCodeBearer(tokenUrl="/login")
 
-def verify_password(plain, hashed) -> None:
+def verify_password(plain, hashed):
     hashed = hash_password(hashed)
-    bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 def create_access_token(data: dict, expires_delta: timedelta):
     to_encode = data.copy() 
@@ -24,7 +23,7 @@ def create_access_token(data: dict, expires_delta: timedelta):
 
 def decode_token(token: str):
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithm = [settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
     except JWTError:
         raise HTTPException(status_code=401, detail = "Invalid token")
