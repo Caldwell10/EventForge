@@ -35,7 +35,7 @@ class ShowOut(BaseModel):
 
 # Seat Schemas
 class SeatCreateBulk(BaseModel):
-    seat_numbers: conlist(str, min_length=1)  # List of seat numbers
+    seat_numbers: conlist(str, min_length=1) 
 
 class SeatOut(BaseModel):
     id: int
