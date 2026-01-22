@@ -5,6 +5,8 @@ from fastapi import HTTPException
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 from app.config import Settings
+from fastapi import Depends
+from app.database import get_db
 
 settings = Settings()
 
@@ -27,3 +29,6 @@ def decode_token(token: str):
         return payload
     except JWTError:
         raise HTTPException(status_code=401, detail = "Invalid token")
+
+
+def get_current_user(user, db = Depends(get_db)):
