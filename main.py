@@ -1,11 +1,16 @@
+import uvicorn
+
+from datetime import timedelta
 from fastapi import FastAPI, HTTPException, Depends
-from app.schema import UserCreate, UserOut, ShowCreate, ShowOut, SeatCreateBulk, SeatOut, ReservationCreate, ReservationOut
+from app.schema import UserCreate, UserOut, ShowCreate, ShowOut, SeatCreateBulk, SeatOut, ReservationCreate, ReservationOut, UserLogin, Token
+from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
+
 from app.models import User, Show, Seat, Reservation
 from app.database import get_db
 from app.services import hash_password, normalize_seat_labels, calculate_hold_expiry
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select, func
-import uvicorn
+from app.auth import verify_password, create_access_token
+from app.config import settings
 
 app = FastAPI()
 
@@ -20,7 +25,6 @@ def create_user(user: UserCreate, db=Depends(get_db)):
     if existing_user:
         raise HTTPException(status_code=400, detail="User already exists")
     
-
     new_user = User(
         name = user.name,
         phone_number = user.phone_number,
@@ -33,6 +37,18 @@ def create_user(user: UserCreate, db=Depends(get_db)):
     db.refresh(new_user)
 
     return new_user
+
+@app.post("/login", response_model=Token)
+def login(user: UserLogin, db = Depends(get_db)):
+    curr_user = db.query(User).filter(User.email == user.email).first()
+    if not curr_user or verify_password(user.password, curr_user.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    access_token = create_access_token(
+        {"sub": curr_user.id, "email": curr_user.email},
+        timedelta(minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
 
 @app.post("/shows/", response_model=ShowOut)
 def create_show(show: ShowCreate, db=Depends(get_db)):
@@ -48,7 +64,6 @@ def create_show(show: ShowCreate, db=Depends(get_db)):
     db.flush(new_show)
 
     return new_show
-
 
 @app.post("/shows/{show_id}/seats", response_model=list[SeatOut])
 def create_seats_bulk(show_id: int, seats: SeatCreateBulk, db=Depends(get_db)):
@@ -91,8 +106,6 @@ def get_seats_for_show(show_id: int, db=Depends(get_db)):
     # fetch seats for the show
     seats = db.query(Seat).filter(Seat.show_id == show_id).all()
     return seats
-
-@app.get()
 
 # reservation endpoints
 @app.post("/reservations/{user_id}/hold", response_model=ReservationOut)
