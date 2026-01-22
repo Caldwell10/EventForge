@@ -18,6 +18,14 @@ class UserOut(BaseModel):
     class Config:
         orm_mode = True
 
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class Token(BaseModel):
+    access_token: str # holds signed JWT
+    token_type: str = "bearer"
+
 # Show Schemas
 class ShowCreate(BaseModel):
     title: str
