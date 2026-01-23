@@ -15,8 +15,9 @@ class UserOut(BaseModel):
     phone_number: str
     email: EmailStr
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -59,8 +60,9 @@ class SeatAvailabilityOut(BaseModel):
     status: Literal["AVAILABLE", "HELD", "RESERVED"]
     hold_expiry: datetime | None = None
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 # Reservation Schemas
@@ -78,6 +80,7 @@ class ReservationOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
