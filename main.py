@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models import User, Show, Seat, Reservation
 from app.database import get_db
 from app.services import hash_password, normalize_seat_labels, calculate_hold_expiry
-from app.auth import verify_password, create_access_token
+from app.auth import verify_password, create_access_token, get_current_user
 from app.config import settings
 
 app = FastAPI()
@@ -41,7 +41,7 @@ def create_user(user: UserCreate, db=Depends(get_db)):
 @app.post("/login", response_model=Token)
 def login(user: UserLogin, db = Depends(get_db)):
     curr_user = db.query(User).filter(User.email == user.email).first()
-    if not curr_user or verify_password(user.password, curr_user.password):
+    if not curr_user or not verify_password(user.password, curr_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     access_token = create_access_token(
         {"sub": curr_user.id, "email": curr_user.email},
@@ -51,8 +51,7 @@ def login(user: UserLogin, db = Depends(get_db)):
 
 
 @app.post("/shows/", response_model=ShowOut)
-def create_show(show: ShowCreate, db=Depends(get_db)):
-    """ create show endpoint"""
+def create_show(show: ShowCreate, db=Depends(get_db), current_user: User = Depends(get_current_user)):
     existing_show = db.query(Show).filter(Show.title == show.title, Show.starts_at == show.starts_at).first()
     if existing_show:
         raise HTTPException(status_code=400, detail="Show with the same title and start time already exists")
@@ -97,7 +96,7 @@ def create_seats_bulk(show_id: int, seats: SeatCreateBulk, db=Depends(get_db)):
     return new_seats
 
 @app.get("/shows/{show_id}/seats", response_model=list[SeatOut])
-def get_seats_for_show(show_id: int, db=Depends(get_db)):
+def get_seats_for_show(show_id: int, db=Depends(get_db), current_user: User = Depends(get_current_user)):
     """create seats for a show"""
     show = db.query(Show).filter(Show.id == show_id).first()
     if not show:
@@ -109,7 +108,7 @@ def get_seats_for_show(show_id: int, db=Depends(get_db)):
 
 # reservation endpoints
 @app.post("/reservations/{user_id}/hold", response_model=ReservationOut)
-def hold_seat_reservation(user_id: int, reservation: ReservationCreate, db=Depends(get_db)):
+def hold_seat_reservation(user_id: int, reservation: ReservationCreate, db=Depends(get_db), current_user: User = Depends(get_current_user)):
     # check if user exists
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -148,7 +147,7 @@ def hold_seat_reservation(user_id: int, reservation: ReservationCreate, db=Depen
     return new_reservation
 
 @app.post("/reservations/{reservation_id}/confirm", response_model=ReservationOut)
-def confirm_seat_reservation(reservation_id: int, db=Depends(get_db)):
+def confirm_seat_reservation(reservation_id: int, db=Depends(get_db), current_user: User = Depends(get_current_user)):
     # Lock reservation row to avoid two concurrent confirmations
     reservation = db.query(Reservation).filter(Reservation.id ==reservation_id).with_for_update().first()
 
@@ -179,7 +178,7 @@ def confirm_seat_reservation(reservation_id: int, db=Depends(get_db)):
     return reservation
 
 @app.post("/reservations/{reservation_id}/release", response_model=ReservationOut)
-def release_seat_reservation(reservation_id: int, db=Depends(get_db)):
+def release_seat_reservation(reservation_id: int, db=Depends(get_db), current_user: User = Depends(get_current_user)):
     reservation = db.query(Reservation).filter(Reservation.id == reservation_id).with_for_update().first()
     if not reservation:
         raise HTTPException(status_code=404, detail="Reservation not found")
