@@ -65,7 +65,7 @@ def create_show(show: ShowCreate, db=Depends(get_db), current_user: User = Depen
     return new_show
 
 @app.post("/shows/{show_id}/seats", response_model=list[SeatOut])
-def create_seats_bulk(show_id: int, seats: SeatCreateBulk, db=Depends(get_db)):
+def create_seats_bulk(show_id: int, seats: SeatCreateBulk, db=Depends(get_db), current_user: User = Depends(get_current_user)):
     """Bulk create seats endpoint"""
     show = db.query(Show).filter(Show.id == show_id).first()
     if not show:
@@ -107,9 +107,10 @@ def get_seats_for_show(show_id: int, db=Depends(get_db), current_user: User = De
     return seats
 
 # reservation endpoints
-@app.post("/reservations/{user_id}/hold", response_model=ReservationOut)
-def hold_seat_reservation(user_id: int, reservation: ReservationCreate, db=Depends(get_db), current_user: User = Depends(get_current_user)):
+@app.post("/reservations/hold", response_model=ReservationOut)
+def hold_seat_reservation(reservation: ReservationCreate, db=Depends(get_db), current_user: User = Depends(get_current_user)):
     # check if user exists
+    user_id = current_user.id
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
