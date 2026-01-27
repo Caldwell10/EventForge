@@ -1,30 +1,33 @@
 from sqlalchemy import select, func
 from app.models import Seat, Reservation
-from helpers import add_seats, make_show, make_user, hold, confirm
+from helpers import add_seats, make_show, make_user, hold, confirm_reservation, login
 from datetime import datetime, timezone
 from conftest import client, db_session
 
 def test_create_show_and_bulk_seats_normalizes_and_blocks_duplicates(client):
-    show = make_show(client)
+    user = make_user(client)
+    headers = login(client, email=user["email"], pwd="secret123")
+    show = make_show(client, headers=headers)
 
     # Add seats with mixed case and spaces
-    resp = add_seats(client, show_id=show["id"], labels=["A1", "B2", " c5 "])
+    resp = add_seats(client, show_id=show["id"], labels=["A1", "B2", " c5 "], headers=headers)
     assert resp.status_code == 200
     body = resp.json()
     seat_numbers = sorted([seat["seat_number"] for seat in body])
     assert seat_numbers == ["A1", "B2", "C5"]  # norrmalized
 
     # try to add duplicate seats in a second call
-    resp_dup = add_seats(client, show_id=show["id"], labels=["A1"])
+    resp_dup = add_seats(client, show_id=show["id"], labels=["A1"], headers=headers)
     assert resp_dup.status_code in (400, 409)
 
-def test_list_seat_availability(client, db):
+def test_list_seat_availability(client, db_session):
     user = make_user(client)
-    show = make_show(client)
-    add_seats(client, show["id"], ["A1"])
+    headers = login(client, email=user["email"], pwd="secret123")
+    show = make_show(client, headers=headers)
+    add_seats(client, show["id"], ["A1"], headers=headers)
 
     #Hold A1
-    resp = hold(client, user_id=user["id"], show_id=show["id"], seat_label="A1", minutes=5)
+    resp = hold(client, show_id=show["id"], seat_label="A1", minutes=5, headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "HELD"
@@ -39,11 +42,12 @@ def test_list_seat_availability(client, db):
 
 def test_hold_seat_success(client, db_session):
     user = make_user(client)
-    show = make_show(client)
-    add_seats(client, show["id"], ["A1"])
+    headers = login(client, email=user["email"], pwd="secret123")
+    show = make_show(client, headers=headers)
+    add_seats(client, show["id"], ["A1"], headers=headers)
 
     # Hold A1
-    resp = hold(client, user_id=user["id"], show_id=show["id"], seat_label="A1", minutes=5)
+    resp = hold(client, show_id=show["id"], seat_label="A1", minutes=5, headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "HELD"
@@ -57,39 +61,41 @@ def test_hold_seat_success(client, db_session):
 
 def test_hold_same_seat_conflict(client):
     user = make_user(client, name="Bob", email="bob@example.com")
-    show = make_show(client, title="Jazz Night")
-    add_seats(client, show["id"], ["B1"])
+    headers = login(client, email=user["email"], pwd="secret123")
+    show = make_show(client, title="Jazz Night", headers=headers)
+    add_seats(client, show["id"], ["B1"], headers=headers)
 
     # First hold succeeds
-    r1 = hold(client, user_id=user["id"], show_id=show["id"], seat_label="B1", minutes=5)
+    r1 = hold(client, show_id=show["id"], seat_label="B1", minutes=5, headers=headers)
     assert r1.status_code == 200
 
     # Second hold (same seat) should fail with 409 (active HELD blocks it)
-    r2 = hold(client, user_id=user["id"], show_id=show["id"], seat_label="B1", minutes=5)
+    r2 = hold(client, show_id=show["id"], seat_label="B1", minutes=5, headers=headers)
     assert r2.status_code in (409, 400)
 
 def test_confirm_success_and_expired_path(client, db_session):
     user = make_user(client, name="Cara", email="cara@example.com")
-    show = make_show(client, title="Symphony")
-    add_seats(client, show["id"], ["C1"])
+    headers = login(client, email=user["email"], pwd="secret123")
+    show = make_show(client, title="Symphony", headers=headers)
+    add_seats(client, show["id"], ["C1"], headers=headers)
 
     # Hold for 10 minutes
-    r = hold(client, user_id=user["id"], show_id=show["id"], seat_label="C1", minutes=10)
+    r = hold(client, show_id=show["id"], seat_label="C1", minutes=10, headers=headers)
     assert r.status_code == 200
     res = r.json()
     res_id = res["id"]
 
     # Confirm should succeed
-    c = confirm(client, res_id)
+    c = confirm_reservation(client, res_id, headers=headers)
     assert c.status_code == 200
     assert c.json()["status"] == "CONFIRMED"
 
     # Make another hold, then force-expire it by setting hold_expiry in the past
-    r2 = hold(client, user_id=user["id"], show_id=show["id"], seat_label="C1", minutes=1)
+    r2 = hold(client, show_id=show["id"], seat_label="C1", minutes=1, headers=headers)
     # This second hold should actually fail because seat is CONFIRMED already (unique partial index),
     # but let's demonstrate expiry on a different seat:
-    add_seats(client, show["id"], ["C2"])
-    r3 = hold(client, user_id=user["id"], show_id=show["id"], seat_label="C2", minutes=1)
+    add_seats(client, show["id"], ["C2"], headers=headers)
+    r3 = hold(client, show_id=show["id"], seat_label="C2", minutes=1, headers=headers)
     assert r3.status_code == 200
     res2 = r3.json()
     res2_id = res2["id"]
@@ -107,7 +113,6 @@ def test_confirm_success_and_expired_path(client, db_session):
     # optional: re-read to assert EXPIRED
     expired = db_session.get(Reservation, res2_id)
     assert expired.status == "EXPIRED"
-
 
 
 
