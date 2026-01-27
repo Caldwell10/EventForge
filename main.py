@@ -59,8 +59,8 @@ def create_show(show: ShowCreate, db=Depends(get_db), current_user: User = Depen
     new_show = Show(**show.dict())
 
     db.add(new_show)
-    db.commit()
     db.flush(new_show)
+    db.commit()
 
     return new_show
 
